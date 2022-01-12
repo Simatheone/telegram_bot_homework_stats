@@ -2,7 +2,9 @@ import logging
 import os
 import time
 
+import requests
 from dotenv import load_dotenv
+from telegram import Bot
 
 
 load_dotenv()
@@ -25,19 +27,29 @@ HOMEWORK_STATUSES = {
 
 
 def send_message(bot, message):
-    ...
+    """Pass."""
+    pass
 
 
 def get_api_answer(current_timestamp):
+    """
+    Функиця делает запрос к API Практикум.Домашка.
+    Возвращает дату в формате dict.
+    """
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
-
-    ...
+    response = requests.get(ENDPOINT, headers=HEADERS, payload=params).json()
+    return response
 
 
 def check_response(response):
-
-    ...
+    """
+    Функция проверяет ответ API на корректность.
+    В случае успеха, функция возвращает список домашних работ.
+    """
+    if response:
+        homeworks = response.get('homeworks')
+    return homeworks
 
 
 def parse_status(homework):
@@ -54,7 +66,14 @@ def parse_status(homework):
 
 
 def check_tokens():
-    ...
+    """
+    Функиця проверяет наличие токенов.
+    В случае отсутствия одного из токенов, функция возвращает False,
+    иначе True.
+    """
+    if not PRACTICUM_TOKEN and TELEGRAM_TOKEN:
+        return False
+    return True
 
 
 def main():
@@ -62,7 +81,7 @@ def main():
 
     ...
 
-    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    bot = Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
 
     ...
