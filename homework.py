@@ -8,7 +8,7 @@ from telegram import Bot
 
 
 load_dotenv()
-
+# LOG_FORMAT = '%(asctime)s [%(levelname)s] %(message)s'
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -27,8 +27,8 @@ HOMEWORK_STATUSES = {
 
 
 def send_message(bot, message):
-    """Pass."""
-    pass
+    """Функция отправляет сообщение юзеру в Telegram."""
+    bot.send_message(TELEGRAM_CHAT_ID, message)
 
 
 def get_api_answer(current_timestamp):
@@ -53,16 +53,19 @@ def check_response(response):
 
 
 def parse_status(homework):
-    homework_name = ...
-    homework_status = ...
-
-    ...
-
-    verdict = ...
-
-    ...
-
-    return f'Изменился статус проверки работы "{homework_name}". {verdict}'
+    """
+    Функиця извлекает из конкретной домашней работы информацию для отправки.
+    Измвлекаемая информация: homework_name, status.
+    Возвращается строка для отправления юзеру.
+    """
+    # Перечитать еще раз задание. Надо выдать 1 домашку.
+    # Способы обработки пустой инфы с домашкой?
+    # Достаточно ли того, что ниже?
+    if homework:
+        homework_name = homework.get('homework_name')
+        homework_status = homework.get('status')
+        verdict = HOMEWORK_STATUSES.get(homework_status)
+        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def check_tokens():
@@ -78,13 +81,8 @@ def check_tokens():
 
 def main():
     """Основная логика работы бота."""
-
-    ...
-
     bot = Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
-
-    ...
 
     while True:
         try:
