@@ -1,10 +1,9 @@
-from pprint import pprint
-
+from http import HTTPStatus
 import logging
 from logging import StreamHandler
 import os
-import time
 import sys
+import time
 
 import requests
 from dotenv import load_dotenv
@@ -14,19 +13,14 @@ import exceptions
 
 load_dotenv()
 
-LOG_FORMAT = '%(asctime)s [%(levelname)s] %(message)s'
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
-# PRACTICUM_TOKEN = ''
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-# TELEGRAM_TOKEN = ''
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-# TELEGRAM_CHAT_ID = ''
 
 RETRY_TIME = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
-
 
 HOMEWORK_STATUSES = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
@@ -36,16 +30,32 @@ HOMEWORK_STATUSES = {
 
 HOMEWORK_NAME = 'homework_name'
 HOMEWORK_STATUS = 'status'
+HOMEWORKS_KEY = 'homeworks'
+
+LOG_FORMAT = '%(asctime)s [%(levelname)s] %(message)s'
 
 # Инициализация логгера
 logger = logging.getLogger(__name__)
 
+# Задание базового конфига для логгера
 logging.basicConfig(format=LOG_FORMAT, level=logging.DEBUG)
+
+# Создание хэндлера для записи в поток
+handler = StreamHandler(stream=sys.stdout)
+logger.addHandler(handler)
 
 
 def send_message(bot, message):
     """Функция отправляет сообщение юзеру в Telegram."""
+    if not TELEGRAM_CHAT_ID:
+        logger.error(
+            ('Сбой при отправке сообщения в Telegram.'
+             ' Отсутствует обязательная переменная окружения:'
+             ' "TELEGRAM_CHAT_ID". Программа принудительно остановлена.')
+        )
+        exit()
     bot.send_message(TELEGRAM_CHAT_ID, message)
+    logger.info('Юзеру отправлено сообщение в Telegram.')
 
 
 def get_api_answer(current_timestamp):
@@ -55,8 +65,18 @@ def get_api_answer(current_timestamp):
     """
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
-    response = requests.get(ENDPOINT, headers=HEADERS, params=params).json()
-    return response
+    response = requests.get(ENDPOINT, headers=HEADERS, params=params)
+
+    if response.status_code != HTTPStatus.OK:
+        status_code = response.status_code
+
+        msg = (f'Эндпоинт [{ENDPOINT}]({ENDPOINT}) недоступен.'
+               f' Код ответа API: {status_code}')
+        log_msg = (f'Сбой в работе программы: Эндпоинт {ENDPOINT} недоступен.'
+                   f' Код ответа API: {status_code}')
+        logger.error(log_msg)
+        raise exceptions.EndpointError(msg)
+    return response.json()
 
 
 def check_response(response):
@@ -64,9 +84,30 @@ def check_response(response):
     Функция проверяет ответ API на корректность.
     В случае успеха, функция возвращает список домашних работ.
     """
-    if response:
-        homeworks = response.get('homeworks')
-        return homeworks
+    if not response:
+        msg = ('Ответ от API пуст. Проверьте корректность введенного'
+               f' эндпоинта {ENDPOINT}, либо время запроса к API,'
+               ' константа "RETRY_TIME".')
+        logger.error(msg)
+        raise exceptions.InvalidResponse(msg)
+
+    homeworks = response['homeworks']
+    homeworks_type = type(homeworks)
+
+    if not isinstance(homeworks, list):
+        msg = (f'Полученный тип данных "{homeworks_type}" в ответе API'
+               ' не соответствует необходимому типу данных "list".')
+        logger.error(msg)
+        raise TypeError(msg)
+
+    if HOMEWORKS_KEY not in response:
+        msg = f'Отсутствует ожидаемый ключ "{HOMEWORKS_KEY}" в ответе API.'
+        logger.error(msg)
+        raise KeyError(msg)
+    if homeworks:
+        return homeworks[0]
+    else:
+        return {}
 
 
 def parse_status(homework):
@@ -76,32 +117,32 @@ def parse_status(homework):
     Возвращается строка для отправления юзеру.
     """
     if not homework:
-        return 'Обновлений пока нет. Ждём-с...'
+        return 'Сегодня домашняя работа не отправлялась. Жду обновлений...'
 
-    for hw in homework:
-        if HOMEWORK_NAME not in hw:
-            msg = 'Ключ "homework_name" отсутствует в словаре.'
-            # Добавить лог ?
-            raise KeyError(msg)
+    if HOMEWORK_NAME not in homework:
+        msg = f'Отсутствует ожидаемый ключ "{HOMEWORK_NAME}" в ответе API.'
+        logger.error(msg)
+        raise KeyError(msg)
 
-        elif HOMEWORK_STATUS not in hw:
-            msg = 'Ключ "status" отсутствует в словаре.'
-            # Добавить лог ?
-            raise KeyError(msg)
+    elif HOMEWORK_STATUS not in homework:
+        msg = (f'Отсутствует ожидаемый ключ "{HOMEWORK_STATUS}" '
+               'в ответе API.')
+        logger.error(msg)
+        raise KeyError(msg)
 
-        else:
-            homework_name = hw.get('homework_name')
-            homework_status = hw.get('status')
+    else:
+        homework_name = homework.get(HOMEWORK_NAME)
+        homework_status = homework.get(HOMEWORK_STATUS)
 
-        if homework_status not in HOMEWORK_STATUSES:
-            msg = (f'Полученный статус задания "{homework_status}"'
-                   ' не соответствует ожидаемому.')
-            # Добавить лог ?
-            raise KeyError(msg)
+    if homework_status not in HOMEWORK_STATUSES:
+        msg = ('Недокументированный статус домашней работы'
+               f' "{homework_status}", обнаруженный в ответе API.')
+        logger.error(msg)
+        raise KeyError(msg)
 
-        verdict = HOMEWORK_STATUSES.get(homework_status)
-        return (f'Изменился статус проверки работы "{homework_name}".'
-                f' {verdict}')
+    verdict = HOMEWORK_STATUSES.get(homework_status)
+    return (f'Изменился статус проверки работы "{homework_name}".'
+            f' {verdict}')
 
 
 def check_tokens():
@@ -122,12 +163,6 @@ def check_tokens():
              ' "TELEGRAM_TOKEN". Программа принудительно остановлена.')
         )
         return False
-    elif not TELEGRAM_CHAT_ID:
-        logger.critical(
-            ('Отсутствует обязательная переменная окружения:'
-             ' "TELEGRAM_CHAT_ID". Программа принудительно остановлена.')
-        )
-        return False
     else:
         return True
 
@@ -139,52 +174,33 @@ def main():
     bot = Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
 
+    previous_telegram_message = []
+    previous_error_message = []
+
     while True:
         try:
-            current_timestamp = 123
             response = get_api_answer(current_timestamp)
             homework = check_response(response)
             message = parse_status(homework)
-            send_message(bot, message)
+            if message not in previous_telegram_message:
+                previous_telegram_message.append(message)
+                send_message(bot, message)
+            else:
+                logger.debug('В ответе отсутствуют новые статусы.')
 
-            current_timestamp = 0
+            current_timestamp = 1
             time.sleep(RETRY_TIME)
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            # НЕ ПОЯВЛЯЕТСЯ ЭТОТ ERROR В ЛОГАХ ???!
-            # logger.error(message)
-            send_message(bot, message)
-            logger.info(
-                f'Бот отправил сообщение "{message}"'
-            )
+            if message not in previous_error_message:
+                previous_error_message.append(message)
+                send_message(bot, message)
+
             time.sleep(RETRY_TIME)
         else:
-            ...
-
-        handler = StreamHandler(stream=sys.stdout)
-        logger.addHandler(handler)
+            logger.debug('Бот работает без ошибок.')
 
 
 if __name__ == '__main__':
     main()
-
-
-"""
-Обязательно должны логироваться такие события:
-
-сбой при отправке сообщения в Telegram (уровень ERROR);
-
-недоступность эндпоинта
-https://practicum.yandex.ru/api/user_api/homework_statuses/ (уровень ERROR);
-
-любые другие сбои при запросе к эндпоинту (уровень ERROR);
-
-отсутствие ожидаемых ключей в ответе API (уровень ERROR)
-!!!!! ПОЯВЛЕНИЕ В ЛОГАХ ?;
-
-недокументированный статус домашней работы, обнаруженный
-в ответе API (уровень ERROR) !!!! НЕ ПОЯВЛЯЕТСЯ В ЛОГАХ ???;
-
-отсутствие в ответе новых статусов (уровень DEBUG).
-"""
