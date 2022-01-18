@@ -47,15 +47,13 @@ logger.addHandler(handler)
 
 def send_message(bot, message):
     """Функция отправляет сообщение юзеру в Telegram."""
-    if not TELEGRAM_CHAT_ID:
-        logger.error(
-            ('Сбой при отправке сообщения в Telegram.'
-             ' Отсутствует обязательная переменная окружения:'
-             ' "TELEGRAM_CHAT_ID". Программа принудительно остановлена.')
-        )
-        exit()
     bot.send_message(TELEGRAM_CHAT_ID, message)
-    logger.info('Юзеру отправлено сообщение в Telegram.')
+    if bot.send_message(TELEGRAM_CHAT_ID, message):
+        logger.info('Юзеру отправлено сообщение в Telegram.')
+    else:
+        msg = ('Сбой при отправке сообщения в Telegram.')
+        logger.error(msg)
+        raise exceptions.SendMessageError(msg)
 
 
 def get_api_answer(current_timestamp):
@@ -91,23 +89,26 @@ def check_response(response):
         logger.error(msg)
         raise exceptions.InvalidResponse(msg)
 
+    if HOMEWORKS_KEY not in response:
+        msg = f'Отсутствует ожидаемый ключ "{HOMEWORKS_KEY}" в ответе API.'
+        logger.error(msg)
+        raise KeyError(msg)
+
     homeworks = response['homeworks']
     homeworks_type = type(homeworks)
 
     if not isinstance(homeworks, list):
         msg = (f'Полученный тип данных "{homeworks_type}" в ответе API'
-               ' не соответствует необходимому типу данных "list".')
+               ' не соответствует ожидаемому типу данных "list".')
         logger.error(msg)
         raise TypeError(msg)
 
-    if HOMEWORKS_KEY not in response:
-        msg = f'Отсутствует ожидаемый ключ "{HOMEWORKS_KEY}" в ответе API.'
-        logger.error(msg)
-        raise KeyError(msg)
     if homeworks:
         return homeworks[0]
     else:
-        return {}
+        msg = 'Отсутствует список домашних работ.'
+        logger.info(msg)
+        raise exceptions.EmptyHomeworksDict(msg)
 
 
 def parse_status(homework):
@@ -161,6 +162,13 @@ def check_tokens():
         logger.critical(
             ('Отсутствует обязательная переменная окружения:'
              ' "TELEGRAM_TOKEN". Программа принудительно остановлена.')
+        )
+        return False
+    elif not TELEGRAM_CHAT_ID:
+        logger.critical(
+            ('Сбой при отправке сообщения в Telegram.'
+             ' Отсутствует обязательная переменная окружения:'
+             ' "TELEGRAM_CHAT_ID". Программа принудительно остановлена.')
         )
         return False
     else:
