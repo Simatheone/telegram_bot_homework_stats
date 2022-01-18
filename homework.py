@@ -9,7 +9,11 @@ import requests
 from dotenv import load_dotenv
 from telegram import Bot
 
-import exceptions
+from exceptions import (
+    EmptyHomeworksDict, EndpointError, InvalidResponse,
+    SendMessageError
+)
+
 
 load_dotenv()
 
@@ -18,7 +22,7 @@ PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_TIME = 600
+RETRY_TIME = 10
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -31,6 +35,7 @@ HOMEWORK_STATUSES = {
 HOMEWORK_NAME = 'homework_name'
 HOMEWORK_STATUS = 'status'
 HOMEWORKS_KEY = 'homeworks'
+CURRENT_DATE_KEY = 'current_date'
 
 LOG_FORMAT = '%(asctime)s [%(levelname)s] %(message)s'
 
@@ -38,7 +43,7 @@ LOG_FORMAT = '%(asctime)s [%(levelname)s] %(message)s'
 logger = logging.getLogger(__name__)
 
 # Задание базового конфига для логгера
-logging.basicConfig(format=LOG_FORMAT, level=logging.DEBUG)
+logging.basicConfig(format=LOG_FORMAT, level=logging.INFO)
 
 # Создание хэндлера для записи в поток
 handler = StreamHandler(stream=sys.stdout)
@@ -52,8 +57,7 @@ def send_message(bot, message):
         logger.info('Юзеру отправлено сообщение в Telegram.')
     else:
         msg = ('Сбой при отправке сообщения в Telegram.')
-        logger.error(msg)
-        raise exceptions.SendMessageError(msg)
+        raise SendMessageError(msg)
 
 
 def get_api_answer(current_timestamp):
@@ -67,13 +71,9 @@ def get_api_answer(current_timestamp):
 
     if response.status_code != HTTPStatus.OK:
         status_code = response.status_code
-
         msg = (f'Эндпоинт [{ENDPOINT}]({ENDPOINT}) недоступен.'
                f' Код ответа API: {status_code}')
-        log_msg = (f'Сбой в работе программы: Эндпоинт {ENDPOINT} недоступен.'
-                   f' Код ответа API: {status_code}')
-        logger.error(log_msg)
-        raise exceptions.EndpointError(msg)
+        raise EndpointError(msg)
     return response.json()
 
 
@@ -86,12 +86,10 @@ def check_response(response):
         msg = ('Ответ от API пуст. Проверьте корректность введенного'
                f' эндпоинта {ENDPOINT}, либо время запроса к API,'
                ' константа "RETRY_TIME".')
-        logger.error(msg)
-        raise exceptions.InvalidResponse(msg)
+        raise InvalidResponse(msg)
 
     if HOMEWORKS_KEY not in response:
         msg = f'Отсутствует ожидаемый ключ "{HOMEWORKS_KEY}" в ответе API.'
-        logger.error(msg)
         raise KeyError(msg)
 
     homeworks = response['homeworks']
@@ -100,7 +98,6 @@ def check_response(response):
     if not isinstance(homeworks, list):
         msg = (f'Полученный тип данных "{homeworks_type}" в ответе API'
                ' не соответствует ожидаемому типу данных "list".')
-        logger.error(msg)
         raise TypeError(msg)
 
     if homeworks:
@@ -108,7 +105,7 @@ def check_response(response):
     else:
         msg = 'Отсутствует список домашних работ.'
         logger.info(msg)
-        raise exceptions.EmptyHomeworksDict(msg)
+        raise EmptyHomeworksDict(msg)
 
 
 def parse_status(homework):
@@ -122,13 +119,11 @@ def parse_status(homework):
 
     if HOMEWORK_NAME not in homework:
         msg = f'Отсутствует ожидаемый ключ "{HOMEWORK_NAME}" в ответе API.'
-        logger.error(msg)
         raise KeyError(msg)
 
     elif HOMEWORK_STATUS not in homework:
         msg = (f'Отсутствует ожидаемый ключ "{HOMEWORK_STATUS}" '
                'в ответе API.')
-        logger.error(msg)
         raise KeyError(msg)
 
     else:
@@ -138,7 +133,6 @@ def parse_status(homework):
     if homework_status not in HOMEWORK_STATUSES:
         msg = ('Недокументированный статус домашней работы'
                f' "{homework_status}", обнаруженный в ответе API.')
-        logger.error(msg)
         raise KeyError(msg)
 
     verdict = HOMEWORK_STATUSES.get(homework_status)
@@ -190,17 +184,24 @@ def main():
             response = get_api_answer(current_timestamp)
             homework = check_response(response)
             message = parse_status(homework)
+
             if message not in previous_telegram_message:
                 previous_telegram_message.append(message)
                 send_message(bot, message)
             else:
                 logger.debug('В ответе отсутствуют новые статусы.')
+            current_timestamp = response.get(CURRENT_DATE_KEY)
 
-            current_timestamp = 1
+            if not isinstance(current_timestamp, int):
+                msg = f'Неверный тип данных {CURRENT_DATE_KEY}'
+                raise TypeError(msg)
+
             time.sleep(RETRY_TIME)
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
+            logger.error(message)
+
             if message not in previous_error_message:
                 previous_error_message.append(message)
                 send_message(bot, message)
