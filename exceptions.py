@@ -1,3 +1,8 @@
+class ConnectionError(Exception):
+    """Исключение для ошибки в запросе к API."""
+    pass
+
+
 class EmptyHomeworksDict(Exception):
     """Исключение для отсутствующего списка домашних работ."""
     pass
@@ -5,6 +10,11 @@ class EmptyHomeworksDict(Exception):
 
 class EndpointError(Exception):
     """Исключение для некорректного Endpoint."""
+    pass
+
+
+class InvalidRequest(Exception):
+    """Исключение для некорректного реквеста на API."""
     pass
 
 

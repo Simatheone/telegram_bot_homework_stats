@@ -10,19 +10,17 @@ from dotenv import load_dotenv
 from telegram import Bot
 
 from exceptions import (
-    EmptyHomeworksDict, EndpointError, InvalidResponse,
-    SendMessageError
+    EmptyHomeworksDict, InvalidRequest, InvalidResponse, SendMessageError
 )
 
 
 load_dotenv()
 
-
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_TIME = 10
+RETRY_TIME = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -52,12 +50,10 @@ logger.addHandler(handler)
 
 def send_message(bot, message):
     """Функция отправляет сообщение юзеру в Telegram."""
-    bot.send_message(TELEGRAM_CHAT_ID, message)
-    if bot.send_message(TELEGRAM_CHAT_ID, message):
-        logger.info('Юзеру отправлено сообщение в Telegram.')
-    else:
-        msg = ('Сбой при отправке сообщения в Telegram.')
-        raise SendMessageError(msg)
+    msg = bot.send_message(TELEGRAM_CHAT_ID, message)
+    if not msg:
+        error_msg = 'Сообщение не было отправлено'
+        raise SendMessageError(error_msg)
 
 
 def get_api_answer(current_timestamp):
@@ -67,14 +63,30 @@ def get_api_answer(current_timestamp):
     """
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
-    response = requests.get(ENDPOINT, headers=HEADERS, params=params)
 
-    if response.status_code != HTTPStatus.OK:
-        status_code = response.status_code
-        msg = (f'Эндпоинт [{ENDPOINT}]({ENDPOINT}) недоступен.'
-               f' Код ответа API: {status_code}')
-        raise EndpointError(msg)
-    return response.json()
+    try:
+        response = requests.get(ENDPOINT, headers=HEADERS, params=params)
+    except Exception:
+        msg = ('Сервер недоступен. Проверьте правильность'
+               f' эндпоинта [{ENDPOINT}].')
+        logger.error(msg)
+        raise ConnectionError(msg)
+
+    api_response = response.json()
+    status_code = response.status_code
+
+    if 'error' in api_response:
+        msg = api_response['error']['error']
+        raise InvalidRequest(msg)
+    elif ('code' in api_response and 'message' in api_response):
+        msg = api_response['code'] + '. ' + api_response['message']
+        raise InvalidRequest(msg)
+
+    if status_code != HTTPStatus.OK:
+        msg = f'Что-то пошло не так. Статус код API {status_code}.'
+        raise ConnectionError(msg)
+
+    return api_response
 
 
 def check_response(response):
@@ -90,7 +102,7 @@ def check_response(response):
 
     if HOMEWORKS_KEY not in response:
         msg = f'Отсутствует ожидаемый ключ "{HOMEWORKS_KEY}" в ответе API.'
-        raise KeyError(msg)
+        raise TypeError(msg)
 
     homeworks = response['homeworks']
     homeworks_type = type(homeworks)
@@ -173,11 +185,12 @@ def main():
     """Основная логика работы бота."""
     if not check_tokens():
         exit()
+
     bot = Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
 
-    previous_telegram_message = []
-    previous_error_message = []
+    previous_telegram_message = None
+    previous_error_message = None
 
     while True:
         try:
@@ -185,11 +198,12 @@ def main():
             homework = check_response(response)
             message = parse_status(homework)
 
-            if message not in previous_telegram_message:
-                previous_telegram_message.append(message)
+            if message != previous_telegram_message:
+                previous_telegram_message = message
                 send_message(bot, message)
             else:
                 logger.debug('В ответе отсутствуют новые статусы.')
+
             current_timestamp = response.get(CURRENT_DATE_KEY)
 
             if not isinstance(current_timestamp, int):
@@ -202,8 +216,8 @@ def main():
             message = f'Сбой в работе программы: {error}'
             logger.error(message)
 
-            if message not in previous_error_message:
-                previous_error_message.append(message)
+            if message != previous_error_message:
+                previous_error_message = message
                 send_message(bot, message)
 
             time.sleep(RETRY_TIME)
