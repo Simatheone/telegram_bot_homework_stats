@@ -90,7 +90,7 @@
 
 ```PRACTICUM_TOKEN``` - можно получить по [адресу](https://oauth.yandex.ru/authorize?response_type=token&client_id=1d0b9dd4d652455a9eb710d450ff456a), если вы студент YandexPracticum.
 
-```TELEGRAM_TOKEN``` - токен бота, который можно получится через главного бота **@Botfather**. Подробности работы с ботом **@Botfather** [ТУТ](https://core.telegram.org/bots).
+```TELEGRAM_TOKEN``` - токен бота, который можно получить через главного бота телеграм **@Botfather**. Подробности работы с ботом **@Botfather** [ТУТ](https://core.telegram.org/bots).
 
 ```TELEGRAM_CHAT_ID=YourTelegramChatID``` - чат айди можно получить у бота **@userinfobot**.
 
